@@ -29,9 +29,33 @@ router.get("/przelewy", (req,res) => {
 
                 updatestatus(transakcje);
 
-                for (t of transakcje)
-                    delete t.id_transakcji;
-                res.send(transakcje);
+                //parsowanie na ustalony format
+                let tr = transakcje.map(t => {
+                    return{
+                        "DebitedAccountNumber":t.rachunek_nadawcy,
+                        "DebitedNameAndAddress":t.nazwa_nadawcy+","+t.adres_nadawcy,
+                        "CreditedAccountNumber":t.rachunek_odbiorcy,
+                        "CreditedNameAndAddress":t.nazwa_odbiorcy+","+t.adres_odbiorcy,
+                        "Title":t.tytul,
+                        "Amount":t.kwota
+                    }
+                })
+
+                //utworzenie obiektu formularza
+                let sumtab = tr.map(t => {return t.Amount}); //map na tablice zawierajaca tylko kwoty
+                //console.dir(sumtab);
+                let sum=0;
+                if (sumtab.length > 0 )
+                    sum = sumtab.reduce( (prev,cur) => {return prev+cur} ); //podliczenie sumy
+
+                let form = {
+                    "BankNo":req.query.nr_banku,
+                    "PaymentSum":sum,
+                    "Payments":tr
+                }
+
+                //wysylanie
+                res.send(form);
 
                 
 
