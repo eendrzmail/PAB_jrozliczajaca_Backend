@@ -27,7 +27,8 @@ router.get("/przelewy", (req,res) => {
 
             request(sqlselect).then(transakcje => {
 
-                updatestatus(transakcje);
+                //!ODKOMENTOWAĆ --------------------------------------------------------------------------------------
+                //updatestatus(transakcje);
 
                 //parsowanie na ustalony format
                 let tr = transakcje.map(t => {
@@ -118,7 +119,7 @@ router.get("/przelewy", (req,res) => {
 
 
 // POST nowy przelew
-router.post("/przelewy",(req,res) => {
+router.post("/przelewy2",(req,res) => {
 
     var dane=req.body;
     console.dir(dane);
@@ -241,10 +242,216 @@ router.post("/przelewy",(req,res) => {
     
 })
 
+router.post("/przelewy",(req,res) => {
+
+    var dane=req.body;
+    console.dir(dane);
+
+    //console.log(bank_decode(dane.rachunek_nadawcy));
+
+    if (bank_decode(dane.BankNo) ){
+
+        var rach_nadawcy= dane.BankNo.substr(2,8);
+        
+        var rach_dopelnienie= '0000000000000000';
+
+        let sql_rach_nadawcy = `select * from rachunki where nr_rachunku = '${rach_nadawcy}${rach_dopelnienie}'`;
+        
+
+        //console.log(sql_rach_nadawcy+"\n"+sql_rach_odbiorcy);
+
+        // --------------------- Sprawdzanie Nadawcy
+        request(sql_rach_nadawcy).then((nadawcy) => {
+             if (nadawcy.length>0){
+                 console.log("Nadawca istnieje");
+                 console.log("");
+                 //tu wywolac funkcje kolejna
+                 zwroc_dane();
+                sprawdz_odbiorce();
+
+             }
+             else{
+                 console.log("Nadawca nie istnieje");
+                 //zakladamy mu konto
+                 let stworzbank= 'INSERT INTO `banki` (`nazwa`,`adres`,`kontakt`) VALUES ("N/A","N/A","N/A")';
+                 //console.log(stworzbank);
+
+                 request(stworzbank).then(nowybank => {
+
+                    let saldostartowe=0;
+                    let stworzrachunek = 'INSERT INTO `rachunki` (`id_banku`,`nr_rachunku`,`saldo`) VALUES'+` (${nowybank.insertId},${rach_nadawcy}${rach_dopelnienie},${saldostartowe})`;
+                    //console.log(stworzrachunek);
+                    
+                    request(stworzrachunek).then(nowyrachunek => {
+
+                        console.dir(nowyrachunek);
+                        console.log("Teraz sprawdzic odbiorce")
+
+                        zwroc_dane();
+                        sprawdz_odbiorce();
+                    })
+
+                 })
+                 .catch(err => {
+                     console.error("cos nie tak z zalozeniem banku");
+                     throw Error(err);
+                 })
+             }
+
+        })
+        .catch(err => {
+            console.error("Cos nie tak z pobraniem rachunku");
+            throw Error(err);
+        })
+
+        //   --------------------sprawdzenie odbiorcy
+        function sprawdz_odbiorce(){
+
+            for (let transakcja of dane.Payments) {
+
+                var rach_odbiorcy= transakcja.DebitedAccountNumber.substr(2,8);
+                let sql_rach_odbiorcy = `select * from rachunki where nr_rachunku = '${rach_odbiorcy}${rach_dopelnienie}'`; 
+
+                request(sql_rach_odbiorcy).then(odbiorca => {
+
+                    if (odbiorca.length>0){
+                        console.log("Odbiorca instnieje");
+                        // wywolanie kolejnego etapu
+                        utworz_transakcje(transakcja);
+                    }
+                    
+                })
+                .catch(err => {
+                    console.log("Cos nie tak z pobraniem odbiorcy");
+                    throw Error(err);
+                })
+
+            }
+
+            
+        }
+
+        function utworz_transakcje(przelew){
+
+            console.dir(przelew);
+            
+            let date=new Date();
+            let timestamp= (''+date.getTime()).substr(9,4);
+            generatenr= (('0' + date.getDate()).slice(-2) + '' + ('0' + (date.getMonth()+1)).slice(-2) + + ('0' + date.getYear()).slice(-2) + '' + timestamp);
+            //console.log(generatenr);
+            let rachunek_nadawcy= przelew.DebitedAccountNumber.substr(2,8);
+            let rachunek_odbiorcy= przelew.CreditedAccountNumber.substr(2,8);
+
+            let sql_newtransakcja = "INSERT INTO `transakcje`(`numer_transakcji`, `typ_operacji`, `data`, `status`, `bank_nadawcy`, `bank_odbiorcy`,`rachunek_nadawcy`, `nazwa_nadawcy`, `adres_nadawcy`, `rachunek_odbiorcy`, `nazwa_odbiorcy`, `adres_odbiorcy`, `kwota`, `tytul`) VALUES ";
+                                        sql_newtransakcja+=`('${generatenr}',1,NOW(),1,'${rachunek_nadawcy}${rach_dopelnienie}','${rachunek_odbiorcy}${rach_dopelnienie}','${przelew.DebitedAccountNumber}','${przelew.DebitedNameAndAddress}','','${przelew.CreditedAccountNumber}','${przelew.CreditedNameAndAddress}','',${przelew.Amount},'${przelew.Title}')`;
+
+            console.log(sql_newtransakcja);
+
+            
+            request(sql_newtransakcja).then(transakcja => {
+                console.log("Dodano przelew");
+
+            })
+            .catch(err => {
+                console.error("Cos nie tak z dodaniem transakcji");
+                throw Error(err);
+            })
+            
+            
+
+        }
+
+        function zwroc_dane(){
+            
+            let bank=dane.BankNo.substr(2,24);
+            let sqlselect= `SELECT * from transakcje where bank_odbiorcy=${bank} AND status=1`;
+            //console.log(sqlselect);
+
+            request(sqlselect).then(transakcje => {
+
+                //!ODEKOMENTOWAĆ ----------------------------------------------------------------------------------------
+                //updatestatus(transakcje);
+
+                //parsowanie na ustalony format
+                let tr = transakcje.map(t => {
+                    return{
+                        "DebitedAccountNumber":t.rachunek_nadawcy,
+                        "DebitedNameAndAddress":t.nazwa_nadawcy+","+t.adres_nadawcy,
+                        "CreditedAccountNumber":t.rachunek_odbiorcy,
+                        "CreditedNameAndAddress":t.nazwa_odbiorcy+","+t.adres_odbiorcy,
+                        "Title":t.tytul,
+                        "Amount":t.kwota
+                    }
+                })
+
+                //utworzenie obiektu formularza
+                let sumtab = tr.map(t => {return t.Amount}); //map na tablice zawierajaca tylko kwoty
+                //console.dir(sumtab);
+                let sum=0;
+                if (sumtab.length > 0 )
+                    sum = sumtab.reduce( (prev,cur) => {return prev+cur} ); //podliczenie sumy
+
+                let form = {
+                    "BankNo":dane.BankNo,
+                    "PaymentSum":sum,
+                    "Payments":tr
+                }
+
+                //wysylanie
+                res.send(form);
+            })
+            .catch(err => {
+                res.send("niepowodzenie")
+            })
+        }
+
+        function updatestatus(transactions) {
+            let t_array= [];
+            for (t of transactions){
+                let sqlstatus = `UPDATE transakcje set status=2 where id_transakcji=${t.id_transakcji}`;
+                t_array.push(request(sqlstatus));
+            }
+    
+            let odejmijsaldo=transactions.map(x => {return x.kwota});
+    
+            if (odejmijsaldo.length>0){
+                
+                odejmijsaldo=odejmijsaldo.reduce((prev,now) => {return prev+now});
+                let saldosql=`UPDATE rachunki set saldo=saldo-${odejmijsaldo} where nr_rachunku=`+transactions[0].bank_odbiorcy;
+    
+                request(saldosql)
+                .catch(err => {
+                    console.log("nie udalo sie zaktualizowqac salda")
+                    throw Error(err);
+                })
+            }
+                
+    
+            //console.log(saldosql);
+            
+    
+            Promise.all(t_array).then(() => {
+                console.log("Zaktualizowano status transakcji")
+            })
+            .catch(err => {
+                console.error("Problem z zaktualizowaniem statusu transakcji");
+                throw Error(err);
+            })
+            //console.dir(t_array);
+        }
+
+    }
+    else{
+        console.log("Niepoprawny nr ktoregos banku");
+        res.status(400);
+        res.send("Niepoprawny nr ktoregos z bankow");
+    }
+    
+})
+
 
 
 function bank_decode(nr){
-
     if (nr.length==26){
         let nr_banku = nr.substr(2,8);
         //console.log(nr_banku);

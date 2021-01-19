@@ -4,7 +4,10 @@ cors = require('cors');
 app = express();
 bodyParser= require('body-parser');
 
-const port=3030;
+var distDir = __dirname;
+app.use(express.static(distDir));
+
+const port= process.env.PORT || 3030;
 
 //załadowanie routerów
 dodajprzelew= require('./routes/newprzelew');
